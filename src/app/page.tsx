@@ -137,7 +137,7 @@ function ReliefMode() {
 
 // ============ AI Mode - 3 Step Pipeline ============
 function AIMode() {
-  const [openrouterKey, setOpenrouterKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
   const [falKey, setFalKey] = useState("");
   const [step, setStep] = useState(1); // 1=upload, 2=design, 3=3d
   const [originalImage, setOriginalImage] = useState<string>("");
@@ -160,13 +160,13 @@ function AIMode() {
 
   // Step 2: AI design with Gemini
   const runDesign = async () => {
-    if (!openrouterKey) { setError("请先输入 OpenRouter API Key"); return; }
+    if (!geminiKey) { setError("请先输入 Google Gemini API Key"); return; }
     if (!originalImage) { setError("请先上传图片"); return; }
     setDesigning(true); setError(""); setDesignedImage(""); setStatus("AI 设计中...");
     try {
       const resp = await fetch("/api/gemini", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-openrouter-key": openrouterKey },
+        headers: { "Content-Type": "application/json", "x-gemini-key": geminiKey },
         body: JSON.stringify({ imageUrl: originalImage, prompt: designPrompt }),
       });
       const data = await resp.json();
@@ -231,9 +231,9 @@ function AIMode() {
         {/* API Keys */}
         <section style={{ marginBottom: 20 }}>
           <h2 style={H2}>🔑 API Keys</h2>
-          <label style={{ fontSize: 12, color: "var(--text-dim)", display: "block", marginBottom: 4 }}>OpenRouter (Gemini生图)</label>
-          <input type="password" value={openrouterKey} onChange={(e) => setOpenrouterKey(e.target.value)} placeholder="sk-or-..." style={input} />
-          <a href="https://openrouter.ai/keys" target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--accent)", display: "block", margin: "4px 0 12px" }}>→ 免费获取</a>
+          <label style={{ fontSize: 12, color: "var(--text-dim)", display: "block", marginBottom: 4 }}>Google Gemini (生图)</label>
+          <input type="password" value={geminiKey} onChange={(e) => setGeminiKey(e.target.value)} placeholder="AIza..." style={input} />
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--accent)", display: "block", margin: "4px 0 12px" }}>→ 免费获取(每天1500次)</a>
           <label style={{ fontSize: 12, color: "var(--text-dim)", display: "block", marginBottom: 4 }}>fal.ai (转3D - Trellis引擎)</label>
           <input type="password" value={falKey} onChange={(e) => setFalKey(e.target.value)} placeholder="fal-xxx..." style={input} />
           <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--accent)", display: "block", margin: "4px 0 0" }}>→ 注册送$1(约50个模型)</a>
@@ -266,7 +266,7 @@ function AIMode() {
           <section style={{ marginBottom: 20 }}>
             <h2 style={H2}>② AI 设计生图</h2>
             <textarea value={designPrompt} onChange={(e) => setDesignPrompt(e.target.value)} rows={2} style={{ ...input, resize: "vertical", marginBottom: 8 }} />
-            <button onClick={runDesign} disabled={designing || !openrouterKey} style={btn(designing || !openrouterKey)}>{designing ? "⏳ " + (status || "生成中...") : "🎨 AI 设计"}</button>
+            <button onClick={runDesign} disabled={designing || !geminiKey} style={btn(designing || !geminiKey)}>{designing ? "⏳ " + (status || "生成中...") : "🎨 AI 设计"}</button>
             {designedImage && (
               <div style={{ marginTop: 8 }}>
                 <img src={designedImage} style={{ maxWidth: "100%", borderRadius: 8 }} />
@@ -297,7 +297,7 @@ function AIMode() {
 
         <div style={infoBox}>
           <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>💰 成本</div>
-          <div>• 生图: 免费 (Gemini via OpenRouter)</div>
+          <div>• 生图: 免费 (Gemini API 直连)</div>
           <div>• 转3D: ~$0.02/次 (Trellis via fal.ai)</div>
           <div>• $1免费额度 = 约50个模型</div>
         </div>
