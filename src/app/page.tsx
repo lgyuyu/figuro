@@ -138,7 +138,7 @@ function ReliefMode() {
 // ============ AI Mode - 3 Step Pipeline ============
 function AIMode() {
   const [openrouterKey, setOpenrouterKey] = useState("");
-  const [meshyKey, setMeshyKey] = useState("");
+  const [falKey, setFalKey] = useState("");
   const [step, setStep] = useState(1); // 1=upload, 2=design, 3=3d
   const [originalImage, setOriginalImage] = useState<string>("");
   const [designPrompt, setDesignPrompt] = useState("turn this into a 3D figurine collectible style, clean background");
@@ -181,7 +181,7 @@ function AIMode() {
 
   // Step 3: Convert to 3D with Meshy
   const convertTo3D = async () => {
-    if (!meshyKey) { setError("请先输入 Meshy API Key"); return; }
+    if (!falKey) { setError("请先输入 fal.ai API Key"); return; }
     if (!designedImage) { setError("请先生成设计图"); return; }
     setConverting(true); setError(""); setModelUrl(null); setStatus("上传图片中..."); setProgress(5);
     try {
@@ -189,7 +189,7 @@ function AIMode() {
       const base64 = designedImage.includes(",") ? designedImage.split(",")[1] : designedImage;
       const upResp = await fetch("/api/meshy", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-meshy-key": meshyKey },
+        headers: { "Content-Type": "application/json", "x-meshy-key": falKey },
         body: JSON.stringify({ action: "upload", imageData: base64 }),
       });
       const upData = await upResp.json();
@@ -198,7 +198,7 @@ function AIMode() {
       // Create task
       const createResp = await fetch("/api/meshy", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-meshy-key": meshyKey },
+        headers: { "Content-Type": "application/json", "x-meshy-key": falKey },
         body: JSON.stringify({ action: "image-to-3d", imageUrl: upData.url, shouldTexture: true, enablePbr: true }),
       });
       const createData = await createResp.json();
@@ -208,10 +208,10 @@ function AIMode() {
       for (let i = 0; i < 120 && pollRef.current; i++) {
         await new Promise(r => setTimeout(r, 3000));
         if (!pollRef.current) break;
-        const pResp = await fetch("/api/meshy?taskId=" + createData.taskId + "&type=image", { headers: { "x-meshy-key": meshyKey } });
+        const pResp = await fetch("/api/meshy?taskId=" + createData.taskId + "&type=image", { headers: { "x-meshy-key": falKey } });
         const pData = await pResp.json();
-        if (pData.status === "SUCCEEDED") { setModelUrl(pData.modelUrls?.glb || null); setStatus("✅ 完成!"); setProgress(100); break; }
-        else if (pData.status === "FAILED") { throw new Error(pData.taskError?.message || "转换失败"); }
+        if (pData.status === "COMPLETED") { setModelUrl(pData.modelUrl); setStatus("✅ 完成!"); setProgress(100); break; }
+        else if (pData.status === "FAILED" || pData.status === "ERROR") { throw new Error("转换失败"); }
         else { setStatus("⏳ " + pData.status + "..."); setProgress(Math.min(pData.progress || 20, 95)); }
       }
     } catch (err) { setError((err as Error).message); }
@@ -231,12 +231,12 @@ function AIMode() {
         {/* API Keys */}
         <section style={{ marginBottom: 20 }}>
           <h2 style={H2}>🔑 API Keys</h2>
-          <label style={{ fontSize: 12, color: "var(--text-dim)", display: "block", marginBottom: 4 }}>OpenRouter (生图)</label>
+          <label style={{ fontSize: 12, color: "var(--text-dim)", display: "block", marginBottom: 4 }}>OpenRouter (Gemini生图)</label>
           <input type="password" value={openrouterKey} onChange={(e) => setOpenrouterKey(e.target.value)} placeholder="sk-or-..." style={input} />
           <a href="https://openrouter.ai/keys" target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--accent)", display: "block", margin: "4px 0 12px" }}>→ 免费获取</a>
-          <label style={{ fontSize: 12, color: "var(--text-dim)", display: "block", marginBottom: 4 }}>Meshy (转3D)</label>
-          <input type="password" value={meshyKey} onChange={(e) => setMeshyKey(e.target.value)} placeholder="msy_..." style={input} />
-          <a href="https://www.meshy.ai/settings/api" target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--accent)", display: "block", margin: "4px 0 0" }}>→ 免费获取 (100 credits/月)</a>
+          <label style={{ fontSize: 12, color: "var(--text-dim)", display: "block", marginBottom: 4 }}>fal.ai (转3D - Trellis引擎)</label>
+          <input type="password" value={falKey} onChange={(e) => setFalKey(e.target.value)} placeholder="fal-xxx..." style={input} />
+          <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--accent)", display: "block", margin: "4px 0 0" }}>→ 注册送$1(约50个模型)</a>
         </section>
 
         {/* Pipeline Steps */}
@@ -280,7 +280,7 @@ function AIMode() {
         {step >= 3 && designedImage && (
           <section style={{ marginBottom: 20 }}>
             <h2 style={H2}>③ AI 转 3D 模型</h2>
-            <button onClick={convertTo3D} disabled={converting || !meshyKey} style={btn(converting || !meshyKey)}>{converting ? "⏳ " + (status || "转换中...") : "🤖 生成 3D 模型"}</button>
+            <button onClick={convertTo3D} disabled={converting || !falKey} style={btn(converting || !falKey)}>{converting ? "⏳ " + (status || "转换中...") : "🤖 生成 3D 模型"}</button>
             {converting && progress > 0 && (
               <div style={{ marginTop: 8 }}>
                 <div style={{ height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
@@ -297,9 +297,9 @@ function AIMode() {
 
         <div style={infoBox}>
           <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>💰 成本</div>
-          <div>• 生图 ~3 credits (OpenRouter)</div>
-          <div>• 转3D ~30 credits (Meshy)</div>
-          <div>• 免费额度够做 ~3 个/月</div>
+          <div>• 生图: 免费 (Gemini via OpenRouter)</div>
+          <div>• 转3D: ~$0.02/次 (Trellis via fal.ai)</div>
+          <div>• $1免费额度 = 约50个模型</div>
         </div>
       </aside>
 
