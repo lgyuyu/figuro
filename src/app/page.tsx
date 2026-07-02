@@ -115,7 +115,7 @@ function ReliefMode() {
 }
 
 function AIMode() {
-  const [falKey, setFalKey] = useState("");
+  // No API key needed
   const [step, setStep] = useState(1);
   const [originalImage, setOriginalImage] = useState("");
   const [originalBase64, setOriginalBase64] = useState("");
@@ -140,91 +140,48 @@ function AIMode() {
     reader.readAsDataURL(file);
   };
 
-  // Step 2: Flux image generation
-  const runDesign = async () => {
-    if (!falKey) { setError("Need fal.ai API key first"); return; }
+  // Step 2: Use uploaded image directly (skip AI design for free tier)
+  const runDesign = () => {
+    setDesignedImage(originalImage);
+    setStep(3);
+  };
+
+  // Step 3: Convert to 3D with HuggingFace Hunyuan3D-2 (FREE!)
+  const convertTo3D = async () => {
     if (!originalBase64) { setError("Upload an image first"); return; }
-    setDesigning(true); setError(""); setStatus("Uploading image..."); setProgress(5);
+    setConverting(true); setError(""); setModelUrl(null); setStatus("Uploading..."); setProgress(5);
     try {
-      // Upload original image to fal storage
-      const upResp = await fetch("/api/fal", {
+      // Upload to HuggingFace Space
+      const upResp = await fetch("/api/hf3d", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-fal-key": falKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "upload", imageData: originalBase64 }),
       });
       const upData = await upResp.json();
       if (!upData.url) throw new Error(upData.error || "Upload failed");
-      setStatus("AI designing (Flux)..."); setProgress(20);
+      setStatus("Submitting 3D task..."); setProgress(15);
 
-      // Submit Flux image-to-image task
-      const genResp = await fetch("/api/fal", {
+      const genResp = await fetch("/api/hf3d", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-fal-key": falKey },
-        body: JSON.stringify({ action: "generate-image", prompt: designPrompt, imageUrl: upData.url }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate", imagePath: upData.url }),
       });
       const genData = await genResp.json();
-      if (!genData.requestId) throw new Error(genData.error || "Image generation failed");
-      setStatus("Generating design..."); setProgress(40);
+      if (!genData.sessionHash) throw new Error(genData.error || "Submit failed");
+      setStatus("AI 3D conversion (1-3 min)..."); setProgress(25);
 
-      // Poll for result
-      for (let i = 0; i < 60; i++) {
-        await new Promise(r => setTimeout(r, 3000));
-        const pResp = await fetch("/api/fal?requestId=" + genData.requestId + "&model=fal-ai/flux/dev", { headers: { "x-fal-key": falKey } });
-        const pData = await pResp.json();
-        if (pData.status === "COMPLETED" && pData.imageUrl) {
-          setDesignedImage(pData.imageUrl); setStep(3); setStatus(""); setProgress(0);
-          return;
-        }
-        if (pData.status === "FAILED" || pData.status === "ERROR") throw new Error("Image generation failed");
-        setProgress(Math.min(40 + i * 2, 90));
-        setStatus("Generating... " + (40 + i * 2) + "%");
-      }
-      throw new Error("Timeout");
-    } catch (err) { setError((err as Error).message); }
-    setDesigning(false);
-  };
-
-  // Step 3: Convert to 3D with Trellis
-  const convertTo3D = async () => {
-    if (!falKey) { setError("Need fal.ai API key"); return; }
-    if (!designedImage) { setError("Generate design image first"); return; }
-    setConverting(true); setError(""); setModelUrl(null); setStatus("Uploading design..."); setProgress(5);
-    try {
-      // Download designed image and re-upload to fal storage
-      const imgResp = await fetch(designedImage);
-      const imgBlob = await imgResp.blob();
-      const reader = new FileReader();
-      const b64 = await new Promise<string>((resolve) => { reader.onload = () => resolve((reader.result as string).split(",")[1]); reader.readAsDataURL(imgBlob); });
-
-      const upResp = await fetch("/api/fal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-fal-key": falKey },
-        body: JSON.stringify({ action: "upload", imageData: b64 }),
-      });
-      const upData = await upResp.json();
-      if (!upData.url) throw new Error(upData.error || "Upload failed");
-      setStatus("Converting to 3D (Trellis)..."); setProgress(15);
-
-      const genResp = await fetch("/api/fal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-fal-key": falKey },
-        body: JSON.stringify({ action: "generate-3d", imageUrl: upData.url }),
-      });
-      const genData = await genResp.json();
-      if (!genData.requestId) throw new Error(genData.error || "3D generation failed");
-      setStatus("AI 3D conversion..."); setProgress(20);
-
-      for (let i = 0; i < 120; i++) {
-        await new Promise(r => setTimeout(r, 3000));
-        const pResp = await fetch("/api/fal?requestId=" + genData.requestId + "&model=fal-ai/trellis", { headers: { "x-fal-key": falKey } });
+      for (let i = 0; i < 100; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+        const pResp = await fetch("/api/hf3d?sessionHash=" + genData.sessionHash);
         const pData = await pResp.json();
         if (pData.status === "COMPLETED" && pData.modelUrl) {
           setModelUrl(pData.modelUrl); setStatus("Done!"); setProgress(100);
           return;
         }
-        if (pData.status === "FAILED" || pData.status === "ERROR") throw new Error("3D conversion failed");
-        setProgress(Math.min(20 + i * 2, 95));
-        setStatus("Converting... " + Math.min(20 + i * 2, 95) + "%");
+        if (pData.status === "ERROR") throw new Error(pData.error || "Failed");
+        if (pData.status === "TIMEOUT") throw new Error("Timeout");
+        setProgress(Math.min(25 + i * 2, 95));
+        setStatus("Converting... " + Math.min(25 + i * 2, 95) + "%");
       }
       throw new Error("Timeout");
     } catch (err) { setError((err as Error).message); }
@@ -248,7 +205,7 @@ function AIMode() {
         {/* API Key */}
         <section style={{ marginBottom: 20 }}>
           <h2 style={H2}>🔑 fal.ai API Key</h2>
-          <input type="password" value={falKey} onChange={(e) => setFalKey(e.target.value)} placeholder="fal-xxxx..." style={inputStyle} />
+          <input type="password"   style={inputStyle} />
           <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--accent)", display: "block", margin: "6px 0 0" }}>→ 注册送 (约43个模型)</a>
         </section>
 
@@ -273,9 +230,9 @@ function AIMode() {
         {/* Step 2: AI Design */}
         {step >= 2 && (
           <section style={{ marginBottom: 20 }}>
-            <h2 style={H2}>② AI Design (Flux)</h2>
+            <h2 style={H2}>② AI Design</h2>
             <textarea value={designPrompt} onChange={(e) => setDesignPrompt(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical", marginBottom: 8 }} />
-            <button onClick={runDesign} disabled={designing || !falKey} style={btn(designing || !falKey)}>{designing ? "⏳ " + (status || progress + "%") : "🎨 AI Design"}</button>
+            <button onClick={runDesign} disabled={designing} style={btn(designing || false)}>{designing ? "⏳ " + (status || progress + "%") : "🎨 AI Design"}</button>
             {(designing || progress > 0) && (
               <div style={{ height: 3, background: "var(--border)", borderRadius: 2, marginTop: 8, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: progress + "%", background: "linear-gradient(90deg, #6366f1, #a855f7)", transition: "width 0.5s" }} />
@@ -288,8 +245,8 @@ function AIMode() {
         {/* Step 3: Convert to 3D */}
         {step >= 3 && designedImage && (
           <section style={{ marginBottom: 20 }}>
-            <h2 style={H2}>③ Convert to 3D (Trellis)</h2>
-            <button onClick={convertTo3D} disabled={converting || !falKey} style={btn(converting || !falKey)}>{converting ? "⏳ " + (status || progress + "%") : "🤖 Generate 3D"}</button>
+            <h2 style={H2}>③ Convert to 3D</h2>
+            <button onClick={convertTo3D} disabled={converting} style={btn(converting || false)}>{converting ? "⏳ " + (status || progress + "%") : "🤖 Generate 3D"}</button>
             {(converting || progress > 0) && (
               <div style={{ height: 3, background: "var(--border)", borderRadius: 2, marginTop: 8, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: progress + "%", background: "linear-gradient(90deg, #6366f1, #a855f7)", transition: "width 0.5s" }} />
