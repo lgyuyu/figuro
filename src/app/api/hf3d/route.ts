@@ -2,38 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 
 const HF_SPACE = "https://tencent-hunyuan3d-2.hf.space";
 
-interface GradioResult {
-  status: string;
-  modelUrl?: string | null;
-  error?: string;
-}
-
-// POST: submit generation task
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { action } = body;
 
-    // Step 1: Upload image to Gradio
     if (action === "upload") {
       const { imageData } = body;
       const buf = Buffer.from(imageData, "base64");
 
+      // Use /upload (NOT /api/upload which gives 500)
       const boundary = "----FormBoundary" + Date.now();
-      const bodyParts = [
-        "--" + boundary + "\r\n",
-        'Content-Disposition: form-data; name="files"; filename="input.jpg"\r\n',
-        "Content-Type: image/jpeg\r\n\r\n",
-      ];
-      const bodyEnd = "\r\n--" + boundary + "--\r\n";
+      const header = "--" + boundary + "\r\n" +
+        'Content-Disposition: form-data; name="files"; filename="input.jpg"\r\n' +
+        "Content-Type: image/jpeg\r\n\r\n";
+      const footer = "\r\n--" + boundary + "--\r\n";
 
       const bodyBuf = Buffer.concat([
-        Buffer.from(bodyParts.join("")),
+        Buffer.from(header),
         buf,
-        Buffer.from(bodyEnd),
+        Buffer.from(footer),
       ]);
 
-      const resp = await fetch(HF_SPACE + "/api/upload", {
+      const resp = await fetch(HF_SPACE + "/upload", {
         method: "POST",
         headers: { "Content-Type": "multipart/form-data; boundary=" + boundary },
         body: bodyBuf,
@@ -49,10 +40,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ url: filePath });
     }
 
-    // Step 2: Submit 3D generation task
     if (action === "generate") {
       const { imagePath } = body;
-      const sessionHash = "figuro_" + Date.now() + "_" + Math.random().toString(36).substring(7);
+      const sessionHash = "figuro_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
 
       const joinData = {
         data: [
@@ -62,7 +52,7 @@ export async function POST(req: NextRequest) {
           30, 7.5, Math.floor(Math.random() * 99999), 128, true, 100000, true,
         ],
         event_data: null,
-        fn_index: 8,
+        fn_index: 5,
         session_hash: sessionHash,
       };
 
@@ -82,25 +72,19 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET: poll task via SSE
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const sessionHash = searchParams.get("sessionHash");
 
-  if (!sessionHash) {
-    return NextResponse.json({ error: "Missing sessionHash" }, { status: 400 });
-  }
+  if (!sessionHash) return NextResponse.json({ error: "Missing sessionHash" }, { status: 400 });
 
   try {
-    // Connect to SSE stream and read until completion
     const sseResp = await fetch(HF_SPACE + "/queue/data?session_hash=" + sessionHash, {
       headers: { Accept: "text/event-stream" },
     });
 
     const reader = sseResp.body?.getReader();
-    if (!reader) {
-      return NextResponse.json({ error: "No SSE stream" }, { status: 500 });
-    }
+    if (!reader) return NextResponse.json({ error: "No SSE stream" }, { status: 500 });
 
     const decoder = new TextDecoder();
     let buffer = "";
@@ -127,25 +111,21 @@ export async function GET(req: NextRequest) {
               }
 
               const results = output.data || [];
-              let modelUrl: string | null = null;
+              let modelUrl = null;
 
+              // Result [0] has the GLB file in .value
               for (const item of results) {
                 if (item && typeof item === "object") {
-                  const url = item.url || "";
-                  const path = item.path || "";
-                  if (url && (url.endsWith(".glb") || url.endsWith(".obj") || url.endsWith(".ply") || url.includes(".glb"))) {
-                    modelUrl = url;
-                  } else if (path && (path.endsWith(".glb") || path.endsWith(".obj"))) {
-                    modelUrl = HF_SPACE + "/file=" + path;
+                  const val = item.value || item;
+                  if (val && val.url && val.orig_name && val.orig_name.endsWith(".glb")) {
+                    modelUrl = val.url;
+                  } else if (val && val.path && val.path.endsWith(".glb")) {
+                    modelUrl = HF_SPACE + "/file=" + val.path;
                   }
                 }
               }
 
-              return NextResponse.json({ status: "COMPLETED", modelUrl, raw: results });
-            }
-
-            if (msg === "process_starts") {
-              // Keep waiting
+              return NextResponse.json({ status: "COMPLETED", modelUrl });
             }
           } catch {
             // ignore parse errors
